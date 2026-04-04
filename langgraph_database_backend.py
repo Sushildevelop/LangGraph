@@ -5,8 +5,9 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 import operator
 from langchain_core.messages import SystemMessage, HumanMessage,BaseMessage
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph.message import add_messages
+import sqlite3
 
 load_dotenv()
 llm=ChatGroq(model="llama-3.3-70b-versatile")
@@ -26,7 +27,9 @@ def chat_node(state:ChatState):
     #response store state
     return {'message':[response]}
 
-checkpointer=InMemorySaver()
+conn=sqlite3.connect(database='chatbot.db', check_same_thread=False) # Create the database file if it doesn't exist
+
+checkpointer=SqliteSaver(conn=conn)
 
 graph = StateGraph(ChatState)
 
@@ -37,23 +40,10 @@ graph.add_edge(START, 'chat_node')
 graph.add_edge('chat_node', END)
 
 chatbot = graph.compile(checkpointer=checkpointer)
+def retrieve_all_threads():
+    all_threads = set()
+    for checkpoint in checkpointer.list(None):
+        all_threads.add(checkpoint.config["configurable"]["thread_id"])
+        
+    return list(all_threads)  
 
-# for message_chunk , metadata in chatbot.stream(
-#     {'message':[HumanMessage(content="tell me a joke")]},
-#     config={'configurable':{'thread_id': 'thread-1'}},
-#     stream_mode='messages'
-# ):
-#     if message_chunk.content:
-#         print(message_chunk.content, end=" ", flush=True)   
-
-# ✅ FIX: Only run CLI when executed directly
-if __name__ == "__main__":
-    thread_id='1'
-    while True:
-        user_message=input('Type here:')
-        print(f'User: {user_message}')
-        if user_message.strip().lower() in ['exit','quit','bye']:
-            break
-        config={'configurable':{'thread_id': thread_id}}
-        response=chatbot.invoke({'message':[HumanMessage(content=user_message)]},config=config)
-        print(f'Assistant: {response["message"][-1].content}')
